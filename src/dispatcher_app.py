@@ -28,75 +28,70 @@ def create_main_keyboard():
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
-    bot.reply_to(message, "Привет! Я ваш персональный ассистент, что будем делать сегодня?",
+    user_id = message.from_user.id
+    user_name = message.from_user.full_name
+    bot.reply_to(message,
+                 "Привет {}! Я ваш персональный ассистент, что будем делать сегодня?".format(user_name),
                  reply_markup=create_main_keyboard())
 
 
 @bot.message_handler(commands=['joka'])
 def handle_start(message):
-    bot.reply_to(message, "Здесь будет сгенерирован лучший анекдот")
+    bot.reply_to(message, "Здесь будет сгенерирован лучший анекдот для {}".format(message.from_user.full_name))
 
 
 @bot.message_handler(commands=['new'])
 def start_task_creation(message):
-    msg = bot.send_message(message.chat.id, "Введите название задачи:")
-    bot.register_next_step_handler(msg, set_task_title)
+    cancel_button = types.KeyboardButton('Отменить создание задачи')
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(cancel_button)
+
+    msg = bot.send_message(message.chat.id, "Введите название задачи:", reply_markup=markup)
+    bot.register_next_step_handler(msg, handle_task_creation)
 
 
-@bot.message_handler(commands=['tasks'])
-def handle_tasks(message):
-    try:
-        response = requests.get(TASK_SERVICE_URL)
-        if response.status_code == 200:
-            tasks = response.json()
-            if len(tasks) == 0:
-                bot.reply_to(message, "Делать было нечего дело было вечером, список задач пуст короче")
-            else:
-                # sorting by deadline
-                tasks.sort(key=lambda x: datetime.strptime(x['deadline'], '%Y-%m-%d'))
-                markup = types.InlineKeyboardMarkup()
-                for task in tasks:
-                    status_emoji = get_status_emoji(task['additional_status'])
-                    task_info = f"{status_emoji} {task['title']} - {task['status']}"
-                    task_button = types.InlineKeyboardButton(task_info, callback_data=f"task_{task['id']}")
-                    markup.add(task_button)
-                bot.reply_to(message, "Вот отсортированный по ближайшему дедлайну список ваших задач:",
-                             reply_markup=markup)
-        else:
-            bot.reply_to(message, "Не удалось получить задачи.")
-    except Exception as e:
-        bot.reply_to(message, f"Ошибка: {str(e)}")
+def handle_task_creation(message):
+    if message.text == 'Отменить создание задачи':
+        bot.send_message(message.chat.id, "Создание задачи отменено.", reply_markup=create_main_keyboard())
+        return
 
-
-def set_task_title(message):
     task_creation_data['title'] = message.text
     now = datetime.now()
-    bot.send_message(message.chat.id, "Выберите дату дедлайна:", reply_markup=calendar.create_calendar(
-        name=calendar_callback.prefix,
-        year=now.year,
-        month=now.month
-    ))
+    bot.send_message(message.chat.id,
+                     "Выберите дату дедлайна:",
+                     reply_markup=calendar.create_calendar(name=calendar_callback.prefix,
+                                                           year=now.year,
+                                                           month=now.month
+                                                           ))
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith(calendar_callback.prefix))
 def handle_calendar(call):
     name, action, year, month, day = call.data.split(calendar_callback.sep)
-    date = calendar.calendar_query_handler(
-        bot=bot, call=call, name=name, action=action, year=year, month=month, day=day
-    )
+    date = calendar.calendar_query_handler(bot=bot,
+                                           call=call,
+                                           name=name,
+                                           action=action,
+                                           year=year,
+                                           month=month,
+                                           day=day)
     if action == "DAY":
         task_creation_data['deadline'] = date.strftime("%Y-%m-%d")
         msg = bot.send_message(call.message.chat.id, "Что является результатом выполнения задачи, кратко опишите:")
         bot.register_next_step_handler(msg, set_task_description)
     elif action == "CANCEL":
-        bot.send_message(call.message.chat.id, "Создание задачи отменено.")
+        bot.send_message(call.message.chat.id, "Создание задачи отменено.", reply_markup=create_main_keyboard())
 
 
 def set_task_description(message):
+    if message.text == 'Отменить создание задачи':
+        bot.send_message(message.chat.id, "Создание задачи отменено.", reply_markup=create_main_keyboard())
+        return
     task_creation_data['description'] = message.text
 
     # prepare new task
     task_data = {
+        'user_id': message.from_user.id,
         'title': task_creation_data['title'],
         'content': task_creation_data['description'],
         'deadline': task_creation_data['deadline']
@@ -107,17 +102,46 @@ def set_task_description(message):
         response = requests.post(TASK_SERVICE_URL, json=task_data)
         if response.status_code == 201:
             bot.send_message(message.chat.id,
-                             f"Задача создана:\nНазвание: {task_creation_data['title']}\nДедлайн: {task_creation_data['deadline']}\nОписание: {task_creation_data['description']}")
+                             f"Задача создана:\nНазвание: {task_creation_data['title']}\nДедлайн: {task_creation_data['deadline']}\nОписание: {task_creation_data['description']}",
+                             reply_markup=create_main_keyboard())
         else:
-            bot.send_message(message.chat.id, "Произошла ошибка при создании задачи.")
+            bot.send_message(message.chat.id, "Произошла ошибка при создании задачи.",
+                             reply_markup=create_main_keyboard())
     except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка: {str(e)}")
+        bot.send_message(message.chat.id, f"Ошибка: {str(e)}", reply_markup=create_main_keyboard())
 
     # temp task can be clear
     task_creation_data.clear()
 
 
-def get_status_emoji(additional_status):
+@bot.message_handler(commands=['tasks'])
+def handle_tasks(message):
+    user_id = message.from_user.id
+    try:
+        response = requests.get(TASK_SERVICE_URL, json=user_id)
+        if response.status_code == 200:
+            tasks = response.json()
+            if len(tasks) == 0:
+                bot.reply_to(message, "Делать было нечего дело было вечером, список задач пуст короче")
+            else:
+                # sorting by deadline
+                tasks.sort(key=lambda x: datetime.strptime(x['deadline'], '%Y-%m-%d'))
+                markup = types.InlineKeyboardMarkup()
+                for task in tasks:
+                    additional_status_emoji = get_additional_status_emoji(task['additional_status'])
+                    status_emoji = get_status_emoji(task['status'])
+                    task_info = f"{status_emoji} {additional_status_emoji} {task['title']} - {task['status']}"
+                    task_button = types.InlineKeyboardButton(task_info, callback_data=f"task_{task['id']}")
+                    markup.add(task_button)
+                bot.reply_to(message, "Вот отсортированный по ближайшему дедлайну список ваших задач:",
+                             reply_markup=markup)
+        else:
+            bot.reply_to(message, "Не удалось получить задачи.")
+    except Exception as e:
+        bot.reply_to(message, f"Ошибка: {str(e)}")
+
+
+def get_additional_status_emoji(additional_status):
     if additional_status == "Сгорел":
         return "💀"
     elif additional_status == "Адище":
@@ -130,11 +154,20 @@ def get_status_emoji(additional_status):
         return "🥶"
 
 
+def get_status_emoji(status):
+    if status == "Сделать":
+        return "🔘"
+    elif status == "Делаю":
+        return "🟢"
+    else:
+        return ""
+
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("task_"))
-def task_callback(call):
+def handle_get_task_from_button_list(call):  # get task from the list
     task_id = call.data.split("_")[1]
     try:
-        response = requests.get(f"{TASK_SERVICE_URL}/{task_id}")
+        response = requests.get(f"{TASK_SERVICE_URL}/{task_id}", json=call.from_user.id)
         if response.status_code == 200:
             task = response.json()
 
@@ -158,15 +191,18 @@ def task_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("status_"))
 def handle_status_change(call):
     _, task_id, new_status = call.data.split("_")
-
     update_url = TASK_UPDATE_URL.format(task_id=task_id)
-    updated_data = {"status": new_status}
+    user_id = call.from_user.id
+    updated_data = {
+        "user_id": user_id,
+        "status": new_status
+    }
 
     try:
         response = requests.put(update_url, json=updated_data)
 
         if response.status_code == 200:
-            task_response = requests.get(f"{TASK_SERVICE_URL}/{task_id}")
+            task_response = requests.get(f"{TASK_SERVICE_URL}/{task_id}", json=call.from_user.id)
 
             if task_response.status_code == 200:
                 task = task_response.json()
@@ -186,10 +222,8 @@ def update_task(message):
     data = message.text.split()
     task_id = data[1]
     updated_data = {
-        "title": data[2],
-        "deadline": data[3],
-        "status": data[4],
-        "additional_status": data[5]
+        "user_id": message.from_user.id,
+        "status": data[4]
     }
     try:
         response = requests.put(TASK_UPDATE_URL.format(task_id=task_id), json=updated_data)
