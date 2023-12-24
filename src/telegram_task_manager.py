@@ -4,7 +4,8 @@ import requests
 from datetime import datetime
 from telebot_calendar import Calendar, CallbackData, RUSSIAN_LANGUAGE
 from constant import TOKEN, TASK_SERVICE_URL, TASK_UPDATE_URL
-
+from redis_manager import RedisManager
+import config
 
 def create_main_keyboard():
     """Creates and returns the main keyboard with commands for the bot."""
@@ -43,6 +44,8 @@ class TelegramTaskManager:
     def __init__(self):
         """Initializes the Telegram bot and sets up handlers for commands and messages."""
         self.bot = telebot.TeleBot(TOKEN)  # bot initialization
+        self.redis_manager = RedisManager(config.REDIS_HOST, config.REDIS_PORT, config.REDIS_DB)  # create Redis Manager instance
+        self.redis_manager.connect()
         self.calendar = Calendar(language=RUSSIAN_LANGUAGE)  # calendar initialization
         self.calendar_callback = CallbackData("calendar", "action", "year", "month", "day")
 
@@ -150,6 +153,13 @@ class TelegramTaskManager:
 
     def handle_start(self, message):
         """Handles the /start command."""
+        user = f"user:{message.from_user.id}"
+        mapping = {
+            "username": message.from_user.username,
+            "last_command": message.text,
+            "lang_code": message.from_user.language_code
+        }
+        self.redis_manager.set_values(user , mapping)
         user_name = message.from_user.full_name
         self.bot.reply_to(message,
                           f"Привет {user_name}! Я ваш персональный ассистент, что будем делать сегодня?",
