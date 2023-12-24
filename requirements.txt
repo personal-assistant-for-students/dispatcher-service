@@ -1,3 +1,5 @@
 pyTelegramBotAPI
 requests
 telebot_calendar
+python-dotenv
+redis
