@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch
-from redis_manager import RedisManager
+from src.redis_manager import RedisManager
 
 
 class TestRedisManager(unittest.TestCase):

@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch, MagicMock
-from telegram_task_manager import TelegramTaskManager
+from src.telegram_task_manager import TelegramTaskManager
 
 class TestTelegramTaskManager(unittest.TestCase):
     @patch('telebot.TeleBot')
